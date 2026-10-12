@@ -1,0 +1,252 @@
+import { zodResolver } from "@hookform/resolvers/zod";
+import { useEffect, useMemo } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { useForm } from "react-hook-form";
+import { z } from "zod";
+import { CardsSkeleton, ErrorState } from "@/components/common/states";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { ARMS } from "@/constants/reference";
+import { getAcademicStructure } from "@/services/academics.service";
+import { ngPhone, requiredText } from "@/lib/validation";
+
+// eslint-disable-next-line react-refresh/only-export-components
+export const studentSchema = z.object({
+  firstName: requiredText("First name"),
+  lastName: requiredText("Surname"),
+  // Optional: the server generates the number when this is left blank. Only
+  // schools migrating their own historical numbering need to supply one.
+  admissionNumber: z
+    .string()
+    .trim()
+    .max(30, { message: "Admission number must be under 30 characters" })
+    .transform((v) => (v.length === 0 ? undefined : v))
+    .optional(),
+  gender: z.enum(["male", "female"]),
+  dateOfBirth: requiredText("Date of birth"),
+  className: requiredText("Class"),
+  arm: requiredText("Arm"),
+  guardianName: requiredText("Guardian name"),
+  guardianPhone: ngPhone,
+});
+
+export type StudentValues = z.output<typeof studentSchema>;
+
+export function StudentForm({
+  defaultValues,
+  submitLabel,
+  isPending,
+  onSubmit,
+  cancelLink,
+  admissionNumberLocked = false,
+}: {
+  defaultValues: StudentValues;
+  submitLabel: string;
+  isPending: boolean;
+  onSubmit: (values: StudentValues) => void;
+  cancelLink: React.ReactNode;
+  /**
+   * Edit mode: the number already exists and is permanent, so it is shown
+   * read-only instead of as an "auto-generate me" blank.
+   */
+  admissionNumberLocked?: boolean;
+}) {
+  const form = useForm<StudentValues>({
+    resolver: zodResolver(studentSchema),
+    defaultValues,
+  });
+  const academics = useQuery({
+    queryKey: ["academics"],
+    queryFn: getAcademicStructure,
+  });
+  const classes = useMemo(() => academics.data?.classes ?? [], [academics.data?.classes]);
+  const availableClasses = [...new Set([...classes, defaultValues.className].filter(Boolean))];
+
+  useEffect(() => {
+    if (!defaultValues.className && classes[0]) {
+      form.setValue("className", classes[0], { shouldValidate: true });
+    }
+  }, [classes, defaultValues.className, form]);
+
+  if (academics.isError) {
+    return (
+      <ErrorState
+        message="School classes could not be loaded, so we can't safely assign this student."
+        onRetry={() => void academics.refetch()}
+      />
+    );
+  }
+  if (academics.isPending) return <CardsSkeleton count={2} />;
+
+  return (
+    <form noValidate className="fn-panel space-y-4 p-5" onSubmit={form.handleSubmit(onSubmit)}>
+      <div className="grid gap-4 sm:grid-cols-2">
+        <Field label="First name" id="firstName" error={form.formState.errors.firstName?.message}>
+          <Input id="firstName" className="h-12" {...form.register("firstName")} />
+        </Field>
+        <Field label="Surname" id="lastName" error={form.formState.errors.lastName?.message}>
+          <Input id="lastName" className="h-12" {...form.register("lastName")} />
+        </Field>
+        <Field
+          label="Admission number"
+          id="admissionNumber"
+          optional={!admissionNumberLocked}
+          hint={
+            admissionNumberLocked
+              ? "An admission number is permanent once issued."
+              : "Leave blank and we'll generate one for you."
+          }
+          error={form.formState.errors.admissionNumber?.message}
+        >
+          <Input
+            id="admissionNumber"
+            className="h-12"
+            placeholder="Auto-generated"
+            readOnly={admissionNumberLocked}
+            {...form.register("admissionNumber")}
+          />
+        </Field>
+        <Field
+          label="Date of birth"
+          id="dateOfBirth"
+          error={form.formState.errors.dateOfBirth?.message}
+        >
+          <Input id="dateOfBirth" type="date" className="h-12" {...form.register("dateOfBirth")} />
+        </Field>
+        <Field label="Gender" id="gender" error={form.formState.errors.gender?.message}>
+          <Select
+            value={form.watch("gender")}
+            onValueChange={(value) => form.setValue("gender", value as "male" | "female")}
+          >
+            <SelectTrigger id="gender" className="h-12">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="male">Male</SelectItem>
+              <SelectItem value="female">Female</SelectItem>
+            </SelectContent>
+          </Select>
+        </Field>
+        <div className="grid grid-cols-2 gap-3">
+          <Field label="Class" id="className" error={form.formState.errors.className?.message}>
+            <Select
+              value={form.watch("className")}
+              onValueChange={(value) => form.setValue("className", value, { shouldValidate: true })}
+            >
+              <SelectTrigger
+                id="className"
+                className="h-12"
+                disabled={availableClasses.length === 0}
+              >
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {availableClasses.map((option) => (
+                  <SelectItem key={option} value={option}>
+                    {option}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            {classes.length === 0 ? (
+              <p className="text-sm text-muted-foreground">
+                Set up a class before registering students.
+              </p>
+            ) : null}
+          </Field>
+          <Field label="Arm" id="arm" error={form.formState.errors.arm?.message}>
+            <Select
+              value={form.watch("arm")}
+              onValueChange={(value) => form.setValue("arm", value)}
+            >
+              <SelectTrigger id="arm" className="h-12">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {ARMS.map((option) => (
+                  <SelectItem key={option} value={option}>
+                    {option}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </Field>
+        </div>
+        <Field
+          label="Guardian name"
+          id="guardianName"
+          error={form.formState.errors.guardianName?.message}
+        >
+          <Input id="guardianName" className="h-12" {...form.register("guardianName")} />
+        </Field>
+        <Field
+          label="Guardian phone"
+          id="guardianPhone"
+          error={form.formState.errors.guardianPhone?.message}
+        >
+          <Input
+            id="guardianPhone"
+            inputMode="tel"
+            placeholder="08012345678"
+            className="h-12"
+            {...form.register("guardianPhone")}
+          />
+        </Field>
+      </div>
+
+      <div className="flex flex-col gap-2 sm:flex-row">
+        <Button type="submit" className="h-12 text-base" disabled={isPending}>
+          {isPending ? "Saving…" : submitLabel}
+        </Button>
+        {cancelLink}
+      </div>
+    </form>
+  );
+}
+
+function Field({
+  label,
+  id,
+  error,
+  hint,
+  optional = false,
+  children,
+}: {
+  label: string;
+  id: string;
+  error?: string | undefined;
+  /** Shown under the control; omitted when there is an error to avoid two messages. */
+  hint?: string;
+  /** Renders a muted "optional" marker instead of the required asterisk. */
+  optional?: boolean;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="space-y-1.5">
+      <Label htmlFor={id}>
+        {label}{" "}
+        {optional ? (
+          <span className="text-xs font-normal text-muted-foreground">(optional)</span>
+        ) : (
+          <span className="text-destructive">*</span>
+        )}
+      </Label>
+      {children}
+      {error ? (
+        <p role="alert" className="text-sm text-destructive">
+          {error}
+        </p>
+      ) : hint ? (
+        <p className="text-sm text-muted-foreground">{hint}</p>
+      ) : null}
+    </div>
+  );
+}

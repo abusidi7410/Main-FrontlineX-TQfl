@@ -1,0 +1,365 @@
+import os
+import sys
+from pathlib import Path
+from datetime import timedelta
+from urllib.parse import urlparse
+
+import environ
+
+BASE_DIR = Path(__file__).resolve().parent.parent
+
+env = environ.Env(
+    DJANGO_DEBUG=(bool, False),
+    DJANGO_ALLOWED_HOSTS=(list, ['localhost', '127.0.0.1']),
+    CORS_ALLOWED_ORIGINS=(list, ['http://localhost:5173']),
+)
+
+env_file = os.path.join(BASE_DIR, '.env')
+if os.path.exists(env_file):
+    env.read_env(env_file)
+
+SECRET_KEY = env('DJANGO_SECRET_KEY')
+DEBUG = env('DJANGO_DEBUG')
+ALLOWED_HOSTS = env('DJANGO_ALLOWED_HOSTS')
+
+RENDER_EXTERNAL_HOSTNAME = os.environ.get('RENDER_EXTERNAL_HOSTNAME')
+if RENDER_EXTERNAL_HOSTNAME and RENDER_EXTERNAL_HOSTNAME not in ALLOWED_HOSTS:
+    ALLOWED_HOSTS.append(RENDER_EXTERNAL_HOSTNAME)
+
+RAILWAY_PUBLIC_DOMAIN = os.environ.get('RAILWAY_PUBLIC_DOMAIN')
+if RAILWAY_PUBLIC_DOMAIN and RAILWAY_PUBLIC_DOMAIN not in ALLOWED_HOSTS:
+    ALLOWED_HOSTS.append(RAILWAY_PUBLIC_DOMAIN)
+
+# ── HTTPS behind a TLS-terminating proxy ────────────────────────────────────
+# Render, Railway and the Nginx edge all terminate TLS and then speak plain HTTP
+# to this process, so the socket scheme is ALWAYS "http" here no matter what the
+# client used. Trust the forwarded scheme header so request.is_secure() reports
+# what actually happened: without it every HTTPS-only setting below silently
+# does nothing, and turning the SSL redirect on would instead redirect forever.
+SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
+
+# Gated on DEBUG so plain-HTTP local development keeps working. HSTS is
+# deliberately env-tunable and defaults OFF-able, because once a browser has
+# cached the policy it is hard to withdraw - set SECURE_HSTS_SECONDS=0 to fall
+# back to serving HTTP while testing a production-shaped deploy.
+if not DEBUG:
+    SECURE_SSL_REDIRECT = env.bool('DJANGO_SECURE_SSL_REDIRECT', default=True)
+    SESSION_COOKIE_SECURE = True
+    CSRF_COOKIE_SECURE = True
+    SECURE_HSTS_SECONDS = env.int('SECURE_HSTS_SECONDS', default=31536000)
+    SECURE_HSTS_INCLUDE_SUBDOMAINS = True
+    SECURE_HSTS_PRELOAD = True
+    SECURE_CONTENT_TYPE_NOSNIFF = True
+    SECURE_REFERRER_POLICY = 'same-origin'
+
+# ── Applications ──────────────────────────────────────────────────────────────
+
+INSTALLED_APPS = [
+    'django.contrib.admin',
+    'django.contrib.auth',
+    'django.contrib.contenttypes',
+    'django.contrib.sessions',
+    'django.contrib.messages',
+    'django.contrib.staticfiles',
+    # Third-party
+    'rest_framework',
+    'rest_framework_simplejwt.token_blacklist',
+    'corsheaders',
+    # Local
+    'accounts',
+    'schools',
+    'records',
+    'billing',
+    'ratelimit',
+]
+
+# ── Middleware ─────────────────────────────────────────────────────────────────
+
+MIDDLEWARE = [
+    'django.middleware.security.SecurityMiddleware',
+    'whitenoise.middleware.WhiteNoiseMiddleware',
+    'django.middleware.gzip.GZipMiddleware',
+    'corsheaders.middleware.CorsMiddleware',
+    # Global Redis rate limiter — single gateway for every /api/ request.
+    'ratelimit.middleware.RateLimitMiddleware',
+    'django.contrib.sessions.middleware.SessionMiddleware',
+    'django.middleware.common.CommonMiddleware',
+    'django.middleware.csrf.CsrfViewMiddleware',
+    'django.contrib.auth.middleware.AuthenticationMiddleware',
+    'django.contrib.messages.middleware.MessageMiddleware',
+    'django.middleware.clickjacking.XFrameOptionsMiddleware',
+]
+
+ROOT_URLCONF = 'config.urls'
+
+TEMPLATES = [
+    {
+        'BACKEND': 'django.template.backends.django.DjangoTemplates',
+        'DIRS': [],
+        'APP_DIRS': True,
+        'OPTIONS': {
+            'context_processors': [
+                'django.template.context_processors.debug',
+                'django.template.context_processors.request',
+                'django.contrib.auth.context_processors.auth',
+                'django.contrib.messages.context_processors.messages',
+            ],
+        },
+    },
+]
+
+WSGI_APPLICATION = 'config.wsgi.application'
+
+# ── Database ──────────────────────────────────────────────────────────────────
+
+DATABASES = {
+    'default': env.db_url('DATABASE_URL', default='sqlite:///db.sqlite3'),
+}
+
+# Reuse DB connections across requests instead of re-handshaking every time
+# (biggest win against cloud TLS overhead). Health checks guard against stale
+# connections dropped by the Supabase pooler.
+if DATABASES['default']['ENGINE'] == 'django.db.backends.postgresql':
+    DATABASES['default']['CONN_MAX_AGE'] = env.int('DB_CONN_MAX_AGE', default=300)
+    DATABASES['default']['CONN_HEALTH_CHECKS'] = True
+    sslmode = 'require' if env.bool('DATABASE_SSL_REQUIRE', default=True) else 'prefer'
+    DATABASES['default'].setdefault('OPTIONS', {})['sslmode'] = sslmode
+
+# A dedicated test-database name is useful when the default test database is
+# wedged behind a pooler session; `TEST_DB_NAME=school_os_test` python manage.py test ...
+_test_db_name = os.environ.get('TEST_DB_NAME')
+if _test_db_name:
+    DATABASES['default']['TEST'] = {'NAME': _test_db_name}
+
+# ── Auth ──────────────────────────────────────────────────────────────────────
+
+AUTH_USER_MODEL = 'accounts.User'
+
+AUTHENTICATION_BACKENDS = [
+    'accounts.backends.EmailOrPhoneBackend',
+]
+
+AUTH_PASSWORD_VALIDATORS = [
+    {'NAME': 'django.contrib.auth.password_validation.UserAttributeSimilarityValidator'},
+    {'NAME': 'django.contrib.auth.password_validation.MinimumLengthValidator'},
+    {'NAME': 'django.contrib.auth.password_validation.CommonPasswordValidator'},
+    {'NAME': 'django.contrib.auth.password_validation.NumericPasswordValidator'},
+]
+
+# First hasher wins: new passwords are hashed with it, and existing users are
+# rehashed on their next successful login (600k iterations vs Django's 1.5M).
+PASSWORD_HASHERS = [
+    'accounts.hashers.AppPBKDF2PasswordHasher',
+    'django.contrib.auth.hashers.PBKDF2PasswordHasher',
+    'django.contrib.auth.hashers.PBKDF2SHA1PasswordHasher',
+    'django.contrib.auth.hashers.Argon2PasswordHasher',
+    'django.contrib.auth.hashers.BCryptSHA256PasswordHasher',
+    'django.contrib.auth.hashers.ScryptPasswordHasher',
+]
+
+# ── i18n / time ──────────────────────────────────────────────────────────────
+
+LANGUAGE_CODE = 'en-us'
+TIME_ZONE = 'Africa/Lagos'
+USE_I18N = True
+USE_TZ = True
+
+# ── Static / media ───────────────────────────────────────────────────────────
+
+STATIC_URL = 'static/'
+STATIC_ROOT = os.path.join(BASE_DIR, 'staticfiles')
+MEDIA_URL = 'media/'
+MEDIA_ROOT = os.path.join(BASE_DIR, 'media')
+DATA_UPLOAD_MAX_MEMORY_SIZE = 6 * 1024 * 1024
+CLOUDINARY_URL = env('CLOUDINARY_URL', default='')
+
+STORAGES = {
+    'staticfiles': {
+        'BACKEND': 'whitenoise.storage.CompressedManifestStaticFilesStorage',
+    },
+}
+
+DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
+
+# ── CORS ─────────────────────────────────────────────────────────────────────
+
+CORS_ALLOWED_ORIGINS = env.list('CORS_ALLOWED_ORIGINS')
+CORS_ALLOW_CREDENTIALS = True
+
+# Custom domain + admin/API hosts must be trusted for CSRF (admin login,
+# browsable API, any cookie/credentialed POST from the live site).
+CSRF_TRUSTED_ORIGINS = env.list(
+    'CSRF_TRUSTED_ORIGINS',
+    default=[
+        'https://frontlinex.ng',
+        'https://www.frontlinex.ng',
+    ],
+)
+
+# ── Redis / cache ─────────────────────────────────────────────────────────────
+
+if env.bool('USE_REDIS', default=True) and env('REDIS_URL', default=None):
+    CACHES = {
+        'default': {
+            'BACKEND': 'django_redis.cache.RedisCache',
+            'LOCATION': env('REDIS_URL'),
+            'OPTIONS': {
+                'CLIENT_CLASS': 'django_redis.client.DefaultClient',
+                'CONNECTION_POOL_KWARGS': {
+                    'max_connections': 20,
+                    'socket_keepalive': True,
+                    'socket_connect_timeout': 5,
+                    'socket_timeout': 5,
+                },
+            },
+        },
+    }
+else:
+    CACHES = {
+        'default': {
+            'BACKEND': 'django.core.cache.backends.locmem.LocMemCache',
+        },
+    }
+
+# ── Django REST Framework ────────────────────────────────────────────────────
+
+REST_FRAMEWORK = {
+    'DEFAULT_AUTHENTICATION_CLASSES': [
+        # Wraps SimpleJWT so a token issued to a school the platform later
+        # suspends stops working on its next request (accounts.authentication).
+        'accounts.authentication.SchoolAccessJWTAuthentication',
+    ],
+    'DEFAULT_PERMISSION_CLASSES': [
+        'rest_framework.permissions.IsAuthenticated',
+    ],
+    'EXCEPTION_HANDLER': 'config.exceptions.frontline_exception_handler',
+}
+
+# ── SimpleJWT ────────────────────────────────────────────────────────────────
+
+SIMPLE_JWT = {
+    'ACCESS_TOKEN_LIFETIME': timedelta(
+        minutes=env.int('JWT_ACCESS_TOKEN_MINUTES', default=30),
+    ),
+    'REFRESH_TOKEN_LIFETIME': timedelta(
+        days=env.int('JWT_REFRESH_TOKEN_DAYS', default=7),
+    ),
+    'ROTATE_REFRESH_TOKENS': True,
+    'BLACKLIST_AFTER_ROTATION': True,
+    'AUTH_HEADER_TYPES': ('Bearer',),
+    'USER_ID_FIELD': 'id',
+    'USER_ID_CLAIM': 'user_id',
+}
+
+# ── Email ────────────────────────────────────────────────────────────────────
+
+EMAIL_BACKEND = 'django.core.mail.backends.console.EmailBackend'
+
+STUDENT_IMPORT_MAX_FILE_SIZE = env.int(
+    'STUDENT_IMPORT_MAX_FILE_SIZE', default=5 * 1024 * 1024,
+)
+STUDENT_IMPORT_MAX_ROWS = env.int('STUDENT_IMPORT_MAX_ROWS', default=10000)
+
+
+# ── Subscriptions & payments (Paystack) ─────────────────────────────────────
+
+# A newly registered school gets a free trial before any payment is due.
+REGISTRATION_TRIAL_DAYS = env.int('REGISTRATION_TRIAL_DAYS', default=7)
+# Length of a paid billing cycle. The product bills monthly on 30-day cycles.
+SUBSCRIPTION_PERIOD_DAYS = env.int('SUBSCRIPTION_PERIOD_DAYS', default=30)
+# The school-facing reactivation/grace window after a plan lapses, before the
+# platform steps in. Purely informational today; kept next to the other
+# subscription numbers so they are decided in one place.
+SUBSCRIPTION_GRACE_DAYS = env.int('SUBSCRIPTION_GRACE_DAYS', default=0)
+
+# Paystack keys are read from the environment and never committed. When the
+# secret key is unset the payment endpoints refuse to initialise a charge rather
+# than pretending one succeeded — a school must never be marked paid by default.
+PAYSTACK_SECRET_KEY = env('PAYSTACK_SECRET_KEY', default='')
+PAYSTACK_PUBLIC_KEY = env('PAYSTACK_PUBLIC_KEY', default='')
+PAYSTACK_BASE_URL = env('PAYSTACK_BASE_URL', default='https://api.paystack.co')
+PAYSTACK_CALLBACK_URL = env(
+    'PAYSTACK_CALLBACK_URL',
+    default='https://frontlinex.ng/subscription',
+)
+
+
+# ── Rate limiting (centralized Redis sliding-window counter) ────────────────
+
+# Redis connection for the rate limiter. Falls back to the main REDIS_URL so a
+# single infra dependency is enough; when neither is set the limiter runs in
+# fail-open mode (requests pass through, a warning is logged). Because it is a
+# shared Redis key namespace, ANY number of web instances enforce one global
+# budget for the same key.
+RATE_LIMIT_REDIS_URL = env('RATE_LIMIT_REDIS_URL', default=None) or env('REDIS_URL', default=None)
+
+# Master switch. Default OFF for the current architecture: rate limiting is
+# enforced at the Nginx edge layer (see /nginx), so requests are rejected before
+# they reach Django at all. Set RATE_LIMIT_ENABLED=true only when running the
+# backend without the Nginx proxy in front (e.g. local dev hitting Django
+# directly), to keep a safety net.
+RATE_LIMIT_ENABLED = env.bool('RATE_LIMIT_ENABLED', default=False)
+# The test runner must never hit the shared rate-limit budget, so drop the Redis
+# URL during tests. The limiter stays enabled but fails open (requests pass).
+if 'test' in sys.argv:
+    RATE_LIMIT_REDIS_URL = None
+
+RATE_LIMIT_ERROR_MESSAGE = 'Too many requests, please try again later'
+
+# Tier order matters: each path is matched against tiers from the top until one
+# matches, so the most specific tier must be listed first. ``standard`` is the
+# catch-all fallback for every other authenticated /api/ route.
+RATE_LIMIT_TIERS = {
+    # Tier 3 – expensive operations (verification, uploads, payments), per user.
+    'expensive': {
+        'limit': 10,
+        'window': 60,
+        'prefixes': [
+            '/api/v1/payments/',
+            '/api/v1/otp/',       # reserved OTP endpoint
+            '/api/v1/upload',     # reserved upload endpoint
+            '/api/v1/students/import',
+        ],
+    },
+    # Tier 1 – authentication, per IP (anti-credential-stuffing).
+    'auth': {
+        'limit': 5,
+        'window': 60,
+        'prefixes': [
+            '/api/v1/auth/login',
+            '/api/v1/auth/school/register',
+        ],
+    },
+    # Tier 2 – every other authenticated /api/ route, per user id.
+    'standard': {
+        'limit': 60,
+        'window': 60,
+        'prefixes': ['/api/'],
+    },
+}
+
+
+# ── Logging ─────────────────────────────────────────────────────────────────
+
+LOGGING = {
+    'version': 1,
+    'disable_existing_loggers': False,
+    'formatters': {
+        'standard': {
+            'format': '%(asctime)s %(levelname)s %(name)s %(message)s',
+        },
+    },
+    'handlers': {
+        'console': {
+            'class': 'logging.StreamHandler',
+            'formatter': 'standard',
+        },
+    },
+    'loggers': {
+        'frontline.ratelimit': {
+            'handlers': ['console'],
+            'level': 'INFO',
+            'propagate': False,
+        },
+    },
+}

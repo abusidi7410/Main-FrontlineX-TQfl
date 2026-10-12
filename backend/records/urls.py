@@ -1,0 +1,87 @@
+from django.urls import path
+
+from . import views
+
+urlpatterns = [
+    path('students/', views.StudentListCreateView.as_view()),
+    path('students/stats/', views.StudentStatsView.as_view()),
+    path('students/import/analyse/', views.StudentImportAnalysisView.as_view()),
+    path('students/import/', views.StudentImportView.as_view()),
+    path('students/<str:pk>/transfer/', views.StudentTransferView.as_view()),
+    path('students/<str:pk>/promote/', views.StudentPromotionView.as_view()),
+    path('students/<str:pk>/', views.StudentDetailView.as_view()),
+    path('staff/', views.StaffListView.as_view()),
+    path('staff/<str:pk>/invite/', views.StaffInviteView.as_view()),
+    path('attendance/class-teachers/', views.ClassTeacherAssignmentView.as_view()),
+    path('staff/<str:pk>/', views.StaffDetailView.as_view()),
+    path('invoices/generate/', views.InvoiceGenerateView.as_view()),
+    path('finance/summary/', views.FinanceSummaryView.as_view()),
+    path('usage/report/', views.UsageReportView.as_view()),
+    path('invoices/', views.InvoiceListView.as_view()),
+    path('fees/structure/', views.FeeStructureView.as_view()),
+    path('payments/<str:pk>/verify/', views.PaymentVerifyView.as_view()),
+    path('payments/<str:pk>/reverse/', views.PaymentReverseView.as_view()),
+    path('payments/<str:pk>/cancel/', views.PaymentCancelView.as_view()),
+    path('payments/', views.PaymentListView.as_view()),
+    path('subscription/', views.SubscriptionView.as_view()),
+    path('assistant/tools/', views.AssistantToolsView.as_view()),
+    path('assistant/query/', views.AssistantQueryView.as_view()),
+    path('results/', views.ResultSheetListView.as_view()),
+    path('results/create/', views.ResultSheetCreateView.as_view()),
+    path('results/report/', views.ResultEntryReportView.as_view()),
+    path('results/children/', views.MyPublishedResultsView.as_view()),
+    path('results/<str:pk>/', views.ResultSheetDetailView.as_view()),
+    path('results/<str:pk>/action/', views.ResultSheetActionView.as_view()),
+    path('attendance/roster/', views.AttendanceRosterView.as_view()),
+    path('attendance/overview/', views.AttendanceOverviewView.as_view()),
+    path('attendance/history/', views.AttendanceHistoryView.as_view()),
+    path('attendance/correct/', views.AttendanceCorrectView.as_view()),
+    path('attendance/check-in/', views.StaffAttendanceCheckInView.as_view()),
+    path('attendance/staff-records/', views.StaffAttendanceListView.as_view()),
+    path(
+        'attendance/staff-records/<str:pk>/review/',
+        views.StaffAttendanceReviewView.as_view(),
+    ),
+    path('attendance/', views.AttendanceSubmitView.as_view()),
+    path('academics/', views.AcademicsView.as_view()),
+    path('academics/subjects/<str:name>/', views.AcademicSubjectDetailView.as_view()),
+    path('academics/subjects/', views.AcademicSubjectsView.as_view()),
+    path('academics/classes/<str:name>/', views.AcademicClassDetailView.as_view()),
+    path('academics/classes/', views.AcademicClassesView.as_view()),
+    path('timetable/', views.TimetableView.as_view()),
+    path('timetable/entries/', views.TimetableEntryCreateView.as_view()),
+    path('timetable/entries/<int:pk>/', views.TimetableEntryDetailView.as_view()),
+    path('timetable/periods/', views.TimetablePeriodCreateView.as_view()),
+    path('timetable/periods/<int:pk>/', views.TimetablePeriodDetailView.as_view()),
+    path('lesson-plans/', views.LessonPlanListCreateView.as_view()),
+    path('lesson-plans/<int:pk>/', views.LessonPlanDetailView.as_view()),
+    path('promotion/policy/', views.PromotionPolicyView.as_view()),
+    path('promotion/classes/', views.PromotionClassesView.as_view()),
+    path('promotion/classes/<str:class_name>/', views.PromotionCandidatesView.as_view()),
+    path(
+        'promotion/classes/<str:class_name>/apply/',
+        views.PromotionApplyView.as_view(),
+    ),
+    # Notifications are self-service (the caller's own inbox), so they sit
+    # here under records rather than under accounts: no role permission applies.
+    path('notifications/', views.NotificationListView.as_view()),
+    path('notifications/read-all/', views.NotificationReadAllView.as_view()),
+    path('notifications/preferences/', views.NotificationPreferenceView.as_view()),
+    path('notifications/<int:pk>/read/', views.NotificationMarkReadView.as_view()),
+    path('announcements/', views.AnnouncementListCreateView.as_view()),
+    path('announcements/<int:pk>/', views.AnnouncementDetailView.as_view()),
+    # Parent portal: children are reached only through the login's explicit
+    # `linked_students` links, never through any id the caller supplies.
+    path('parents/me/children/', views.ParentChildrenView.as_view()),
+    path(
+        'parents/me/children/<str:student_id>/attendance/',
+        views.ParentChildAttendanceView.as_view(),
+    ),
+    path(
+        'parents/me/children/<str:student_id>/promotion/',
+        views.ParentChildPromotionView.as_view(),
+    ),
+    # The report card read model, shared by the parent portal and the staff
+    # reports screen.
+    path('reports/report-cards/<str:student_id>/', views.ReportCardView.as_view()),
+]

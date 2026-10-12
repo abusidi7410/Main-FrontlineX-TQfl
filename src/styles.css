@@ -1,0 +1,697 @@
+@import "tailwindcss" source(none);
+@source "../src";
+@import "tw-animate-css";
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+@theme inline {
+  --font-sans: "Geist", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-display: "Fraunces", "Iowan Old Style", Georgia, "Times New Roman", serif;
+  --radius-sm: calc(var(--radius) - 8px);
+  --radius-md: calc(var(--radius) - 4px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+  --radius-2xl: calc(var(--radius) + 8px);
+  --radius-3xl: calc(var(--radius) + 12px);
+  --color-background: hsl(var(--background));
+  --color-foreground: hsl(var(--foreground));
+  --color-surface: hsl(var(--surface));
+  --color-surface-foreground: hsl(var(--surface-foreground));
+  --color-card: hsl(var(--card));
+  --color-card-foreground: hsl(var(--card-foreground));
+  --color-popover: hsl(var(--popover));
+  --color-popover-foreground: hsl(var(--popover-foreground));
+  --color-primary: hsl(var(--primary));
+  --color-primary-foreground: hsl(var(--primary-foreground));
+  --color-primary-soft: hsl(var(--primary-soft));
+  --color-secondary: hsl(var(--secondary));
+  --color-secondary-foreground: hsl(var(--secondary-foreground));
+  --color-muted: hsl(var(--muted));
+  --color-muted-foreground: hsl(var(--muted-foreground));
+  --color-accent: hsl(var(--accent));
+  --color-accent-foreground: hsl(var(--accent-foreground));
+  --color-brass: hsl(var(--brass));
+  --color-brass-foreground: hsl(var(--brass-foreground));
+  --color-brass-soft: hsl(var(--brass-soft));
+  --color-destructive: hsl(var(--destructive));
+  --color-destructive-foreground: hsl(var(--destructive-foreground));
+  --color-success: hsl(var(--success));
+  --color-success-foreground: hsl(var(--success-foreground));
+  --color-success-soft: hsl(var(--success-soft));
+  --color-warning: hsl(var(--warning));
+  --color-warning-foreground: hsl(var(--warning-foreground));
+  --color-warning-soft: hsl(var(--warning-soft));
+  --color-info: hsl(var(--info));
+  --color-info-soft: hsl(var(--info-soft));
+  --color-border: hsl(var(--border));
+  --color-input: hsl(var(--input));
+  --color-ring: hsl(var(--ring));
+  --color-ring-offset-background: hsl(var(--background));
+  --color-chart-1: hsl(var(--chart-1));
+  --color-chart-2: hsl(var(--chart-2));
+  --color-chart-3: hsl(var(--chart-3));
+  --color-chart-4: hsl(var(--chart-4));
+  --color-chart-5: hsl(var(--chart-5));
+  --color-sidebar: hsl(var(--sidebar));
+  --color-sidebar-foreground: hsl(var(--sidebar-foreground));
+  --color-sidebar-primary: hsl(var(--sidebar-primary));
+  --color-sidebar-primary-foreground: hsl(var(--sidebar-primary-foreground));
+  --color-sidebar-accent: hsl(var(--sidebar-accent));
+  --color-sidebar-accent-foreground: hsl(var(--sidebar-accent-foreground));
+  --color-sidebar-border: hsl(var(--sidebar-border));
+  --color-sidebar-ring: hsl(var(--sidebar-ring));
+  /* Shadows are declared in :root/.dark only and consumed via
+     shadow-[var(--shadow-*)]. Declaring them in @theme inline would bake the
+     light value into the utility and freeze it out of dark mode. */
+  --ease-premium: cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+:root {
+  color-scheme: light;
+  --radius: 0.625rem;
+  --shadow-card: 0 1px 2px hsl(222 47% 20% / 0.06);
+  --shadow-raised: 0 10px 26px -10px hsl(222 47% 18% / 0.16);
+  --shadow-overlay: 0 26px 60px -20px hsl(222 47% 12% / 0.3);
+  --shadow-glow: 0 0 0 3px hsl(222 62% 26% / 0.14);
+  --shadow-brass: 0 8px 22px -10px hsl(36 72% 40% / 0.45);
+  --background: 40 33% 97%;
+  --foreground: 222 47% 11%;
+  --surface: 40 40% 99%;
+  --surface-foreground: 222 47% 11%;
+  --card: 40 40% 99%;
+  --card-foreground: 222 47% 11%;
+  --popover: 40 40% 99%;
+  --popover-foreground: 222 47% 11%;
+  --primary: 222 62% 21%;
+  --primary-foreground: 40 40% 98%;
+  --primary-soft: 220 45% 94%;
+  --secondary: 40 28% 94%;
+  --secondary-foreground: 222 47% 16%;
+  --muted: 40 26% 94%;
+  --muted-foreground: 220 11% 42%;
+  --accent: 40 30% 92%;
+  --accent-foreground: 222 47% 14%;
+  --brass: 36 74% 42%;
+  --brass-foreground: 222 50% 10%;
+  --brass-soft: 40 82% 91%;
+  --destructive: 0 62% 44%;
+  --destructive-foreground: 0 0% 100%;
+  --success: 152 52% 30%;
+  --success-foreground: 0 0% 100%;
+  --success-soft: 152 48% 93%;
+  --warning: 32 88% 38%;
+  --warning-foreground: 0 0% 100%;
+  --warning-soft: 38 90% 92%;
+  --info: 215 68% 42%;
+  --info-soft: 214 72% 93%;
+  --border: 38 18% 87%;
+  --input: 38 16% 83%;
+  --ring: 222 62% 26%;
+  --chart-1: 222 62% 26%;
+  --chart-2: 36 74% 46%;
+  --chart-3: 190 48% 36%;
+  --chart-4: 0 62% 48%;
+  --chart-5: 215 68% 46%;
+  --sidebar: 222 47% 13%;
+  --sidebar-foreground: 40 30% 96%;
+  --sidebar-primary: 40 78% 56%;
+  --sidebar-primary-foreground: 222 47% 10%;
+  --sidebar-accent: 220 38% 22%;
+  --sidebar-accent-foreground: 40 40% 98%;
+  --sidebar-border: 220 32% 22%;
+  --sidebar-ring: 40 78% 56%;
+}
+
+.dark {
+  color-scheme: dark;
+  --shadow-card: 0 1px 2px hsl(222 40% 3% / 0.5);
+  --shadow-raised: 0 12px 28px -12px hsl(222 40% 2% / 0.7);
+  --shadow-overlay: 0 28px 64px -22px hsl(222 40% 2% / 0.8);
+  --shadow-glow: 0 0 0 3px hsl(217 70% 52% / 0.24);
+  --shadow-brass: 0 8px 22px -10px hsl(40 80% 50% / 0.4);
+  --background: 222 30% 6%;
+  --foreground: 40 22% 96%;
+  --surface: 222 28% 9%;
+  --surface-foreground: 40 22% 96%;
+  --card: 222 28% 9%;
+  --card-foreground: 40 22% 96%;
+  --popover: 222 28% 10%;
+  --popover-foreground: 40 22% 96%;
+  --primary: 217 78% 60%;
+  --primary-foreground: 222 40% 6%;
+  --primary-soft: 217 40% 16%;
+  --secondary: 222 24% 15%;
+  --secondary-foreground: 40 22% 96%;
+  --muted: 222 24% 15%;
+  --muted-foreground: 220 12% 66%;
+  --accent: 222 24% 17%;
+  --accent-foreground: 40 22% 96%;
+  --brass: 40 82% 58%;
+  --brass-foreground: 222 40% 6%;
+  --brass-soft: 38 40% 16%;
+  --destructive: 0 62% 52%;
+  --destructive-foreground: 0 0% 100%;
+  --success: 152 52% 48%;
+  --success-foreground: 222 40% 6%;
+  --success-soft: 152 32% 15%;
+  --warning: 36 90% 58%;
+  --warning-foreground: 222 40% 6%;
+  --warning-soft: 36 42% 16%;
+  --info: 210 90% 66%;
+  --info-soft: 210 42% 16%;
+  --border: 222 20% 20%;
+  --input: 222 20% 25%;
+  --ring: 40 82% 58%;
+  --chart-1: 40 82% 58%;
+  --chart-2: 217 70% 58%;
+  --chart-3: 168 50% 48%;
+  --chart-4: 0 68% 62%;
+  --chart-5: 210 90% 66%;
+  --sidebar: 222 32% 8%;
+  --sidebar-foreground: 40 22% 94%;
+  --sidebar-primary: 40 82% 58%;
+  --sidebar-primary-foreground: 222 40% 6%;
+  --sidebar-accent: 220 24% 16%;
+  --sidebar-accent-foreground: 40 22% 98%;
+  --sidebar-border: 222 20% 18%;
+  --sidebar-ring: 40 82% 58%;
+}
+
+@layer base {
+  * {
+    border-color: var(--color-border);
+  }
+
+  html {
+    -webkit-text-size-adjust: 100%;
+    text-rendering: optimizeLegibility;
+    -moz-osx-font-smoothing: grayscale;
+    scroll-behavior: smooth;
+  }
+
+  body {
+    background-color: var(--color-background);
+    color: var(--color-foreground);
+    font-family: var(--font-sans);
+    font-size: 14px;
+    line-height: 1.6;
+    letter-spacing: -0.011em;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+  }
+
+  h1,
+  h2,
+  h3,
+  h4 {
+    font-family: var(--font-display);
+    font-variation-settings: "SOFT" 0, "WONK" 0;
+    font-optical-sizing: auto;
+    letter-spacing: -0.012em;
+    line-height: 1.18;
+    font-weight: 600;
+    color: var(--color-foreground);
+  }
+
+  h1 {
+    font-size: 1.875rem;
+  }
+
+  h2 {
+    font-size: 1.5rem;
+  }
+
+  h3 {
+    font-size: 1.25rem;
+  }
+
+  h4 {
+    font-size: 1.125rem;
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--color-ring);
+    outline-offset: 2px;
+    border-radius: var(--radius-sm);
+  }
+
+  ::selection {
+    background-color: hsl(var(--primary) / 0.16);
+    color: var(--color-foreground);
+  }
+
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    background: hsl(var(--foreground) / 0.14);
+    border-radius: 999px;
+    border: 3px solid transparent;
+    background-clip: padding-box;
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    background: hsl(var(--foreground) / 0.26);
+    background-clip: padding-box;
+  }
+
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: hsl(var(--foreground) / 0.18) transparent;
+  }
+}
+
+@keyframes fn-fade-up {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes fn-fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@utility fn-panel {
+  background-color: var(--color-card);
+  border: 1px solid var(--color-border);
+  border-radius: 12px;
+  box-shadow: var(--shadow-card);
+  transition:
+    box-shadow 150ms ease,
+    background-color 150ms ease,
+    border-color 150ms ease;
+}
+
+@utility fn-panel-hover {
+  transition:
+    box-shadow 150ms ease,
+    border-color 150ms ease;
+  &:hover {
+    box-shadow: var(--shadow-raised);
+    border-color: hsl(var(--foreground) / 0.18);
+  }
+}
+
+@utility fn-glass {
+  background-color: var(--color-card);
+  border: 1px solid var(--color-border);
+  border-radius: 12px;
+  box-shadow: var(--shadow-card);
+}
+
+@utility fn-icon-tile {
+  display: grid;
+  place-items: center;
+  border-radius: 10px;
+  background-color: var(--color-muted);
+  color: var(--color-foreground);
+}
+
+/* Brass hairline that anchors page and section headings. */
+@utility fn-rule {
+  display: block;
+  width: 2.25rem;
+  height: 2px;
+  border-radius: 999px;
+  background-color: var(--color-brass);
+}
+
+/* Uppercase micro-label used above grouped content and in nav sections. */
+@utility fn-eyebrow {
+  font-size: 0.6875rem;
+  font-weight: 600;
+  line-height: 1.2;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--color-muted-foreground);
+}
+
+@keyframes fn-shimmer {
+  0% {
+    background-position: -200% 0;
+  }
+  100% {
+    background-position: 200% 0;
+  }
+}
+
+@utility fn-skeleton {
+  background-image: linear-gradient(
+    100deg,
+    hsl(var(--muted)) 40%,
+    hsl(var(--card)) 50%,
+    hsl(var(--muted)) 60%
+  );
+  background-size: 200% 100%;
+  border-radius: 12px;
+  animation: fn-shimmer 1.8s ease-in-out infinite;
+}
+
+@utility fn-enter {
+  animation: fn-fade-up 0.55s var(--ease-premium) both;
+}
+
+@utility fn-enter-in {
+  animation: fn-fade-in 0.4s var(--ease-premium) both;
+}
+
+@utility fn-grid-bg {
+  background-image:
+    linear-gradient(to right, hsl(var(--foreground) / 0.05) 1px, transparent 1px),
+    linear-gradient(to bottom, hsl(var(--foreground) / 0.05) 1px, transparent 1px);
+  background-size: 48px 48px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 1ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 1ms !important;
+    scroll-behavior: auto !important;
+  }
+  [data-auth-frame] [data-auth-pane],
+  [data-auth-frame] [data-auth-overlay] {
+    transition-duration: 1ms;
+    transition-delay: 0ms;
+  }
+  [data-auth-frame] [data-auth-overlay] > div {
+    transition-duration: 1ms;
+  }
+  [data-auth-compact],
+  [data-auth-compact] * {
+    animation-duration: 1ms;
+    animation-delay: 0ms;
+  }
+}
+
+@keyframes fn-slide-up {
+  from {
+    opacity: 0;
+    transform: translateY(18px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@utility fn-slide-up {
+  animation: fn-slide-up 0.5s var(--ease-premium) both;
+}
+
+/* Authentication surfaces use the same theme tokens as the rest of the app. */
+:root {
+  --auth-ivory: hsl(var(--background));
+  --auth-ivory-light: hsl(var(--card));
+  --auth-ivory-deep: hsl(var(--muted));
+  --auth-navy: hsl(var(--primary));
+  --auth-ink: hsl(var(--foreground));
+  --auth-muted: hsl(var(--muted-foreground));
+  --auth-muted-soft: hsl(var(--muted-foreground));
+  --auth-placeholder: hsl(var(--muted-foreground));
+  --auth-error: hsl(var(--destructive));
+  --auth-shadow-dark: 0 12px 32px hsl(var(--foreground) / 0.08);
+  --auth-shadow-light: 0 1px 2px hsl(var(--foreground) / 0.03);
+  --auth-ease: cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.auth-page {
+  background-color: var(--auth-ivory);
+  color: var(--auth-ink);
+}
+
+/* Main authentication frame — a soft raised surface. Size is a clamp on the
+   viewport (prefers 600px, floors at 520px) so it never collapses on short
+   windows; panes scroll internally, and if the page still outgrows the
+   viewport the document scrolls naturally instead of clipping. */
+.auth-frame {
+  height: clamp(520px, calc(100dvh - 12.5rem), 600px);
+  background: var(--auth-ivory);
+  border-radius: 20px;
+  border: 1px solid hsl(var(--border));
+  box-shadow: var(--auth-shadow-dark);
+}
+
+/* Mobile / single-column card (slightly gentler corners + padding driven by Tailwind) */
+.auth-card {
+  background: var(--auth-ivory);
+  border-radius: 24px;
+  border: 1px solid hsl(var(--border));
+  box-shadow: var(--auth-shadow-dark);
+}
+
+/* Sliding welcome panel uses the same flat surface as the rest of the form. */
+.auth-welcome {
+  background: var(--auth-ivory-light);
+  box-shadow: inset 0 0 0 1px hsl(var(--border) / 0.6);
+  will-change: transform;
+}
+
+/* Primary navy pill button */
+.auth-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-width: 148px;
+  height: 48px;
+  padding: 0 28px;
+  border-radius: 12px;
+  background: var(--auth-navy);
+  color: hsl(var(--primary-foreground));
+  font-family: var(--font-display);
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0;
+  box-shadow: 0 4px 12px hsl(var(--primary) / 0.18);
+  transition:
+    transform 0.25s var(--auth-ease),
+    box-shadow 0.25s var(--auth-ease),
+    background-color 0.25s var(--auth-ease);
+  cursor: pointer;
+}
+
+.auth-btn:hover {
+  transform: translateY(-1px);
+  background: color-mix(in srgb, var(--auth-navy) 90%, black);
+  box-shadow: 0 7px 16px hsl(var(--primary) / 0.22);
+}
+
+.auth-btn:active {
+  transform: translateY(0) scale(0.985);
+  box-shadow: 0 2px 6px hsl(var(--primary) / 0.16);
+}
+
+.auth-btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+  transform: none;
+}
+
+.auth-btn:focus-visible {
+  outline: 2px solid hsl(var(--ring));
+  outline-offset: 3px;
+}
+
+/* Ghost pill button (used on the welcome panel) */
+.auth-btn-ghost {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-width: 148px;
+  height: 48px;
+  padding: 0 28px;
+  border-radius: 12px;
+  background: transparent;
+  color: var(--auth-navy);
+  border: 1px solid hsl(var(--border));
+  font-family: var(--font-display);
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0;
+  transition:
+    transform 0.25s var(--auth-ease),
+    background-color 0.25s var(--auth-ease),
+    border-color 0.25s var(--auth-ease),
+    box-shadow 0.25s var(--auth-ease);
+  cursor: pointer;
+}
+
+.auth-btn-ghost:hover {
+  background: hsl(var(--primary) / 0.06);
+  border-color: hsl(var(--primary) / 0.4);
+  box-shadow: 0 4px 12px hsl(var(--foreground) / 0.06);
+}
+
+.auth-btn-ghost:active {
+  transform: scale(0.985);
+}
+
+.auth-btn-ghost:focus-visible {
+  outline: 2px solid hsl(var(--ring));
+  outline-offset: 3px;
+}
+
+/* Form action pills: centered on their own, width follows the label so the
+   composition keeps the reference's understated single-action character */
+.auth-btn.auth-btn-form {
+  min-width: 180px;
+  height: 48px;
+  padding: 0 34px;
+  font-size: 14px;
+  letter-spacing: 0;
+}
+
+.auth-btn-ghost.auth-btn-form {
+  min-width: 180px;
+  height: 48px;
+  padding: 0 34px;
+  font-size: 14px;
+  letter-spacing: 0;
+}
+
+/* Muted recessed panel used for callouts / summaries */
+.auth-inset {
+  background: var(--auth-ivory-deep);
+  border-radius: 14px;
+  box-shadow:
+    inset 2px 2px 6px hsl(var(--foreground) / 0.04),
+    inset -2px -2px 6px hsl(var(--foreground) / 0.02);
+}
+
+/* Plan selector cards */
+.auth-tier {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 14px 16px;
+  border-radius: 14px;
+  background: var(--auth-ivory-light);
+  border: 1px solid hsl(var(--border));
+  box-shadow: inset 1px 1px 3px hsl(var(--foreground) / 0.03);
+  transition:
+    background-color 0.2s ease,
+    border-color 0.2s ease,
+    box-shadow 0.2s ease;
+  cursor: pointer;
+}
+
+.auth-tier:hover {
+  background: hsl(var(--card));
+  border-color: hsl(var(--foreground) / 0.24);
+}
+
+.auth-tier[aria-pressed="true"] {
+  background: hsl(var(--card));
+  border-color: hsl(var(--ring) / 0.55);
+  box-shadow:
+    0 8px 20px -10px hsl(var(--foreground) / 0.2),
+    inset 1px 1px 3px hsl(var(--foreground) / 0.03);
+}
+
+.auth-tier:focus-visible {
+  outline: 2px solid hsl(var(--ring));
+  outline-offset: 2px;
+}
+
+/* Small uppercase secondary action */
+.auth-link {
+  color: var(--auth-muted);
+  font-size: 13px;
+  font-weight: 500;
+  letter-spacing: 0;
+  transition: color 0.2s ease;
+  cursor: pointer;
+}
+
+.auth-link:hover {
+  color: var(--auth-navy);
+}
+
+.auth-link:focus-visible {
+  outline: 2px solid hsl(var(--ring));
+  outline-offset: 3px;
+  border-radius: 4px;
+}
+
+/* Recessed neumorphic input */
+.auth-input {
+  width: 100%;
+  height: 48px;
+  padding: 0 16px;
+  border-radius: 12px;
+  background: var(--auth-ivory-light);
+  border: 1px solid hsl(var(--border));
+  color: var(--auth-ink);
+  font-size: 14px;
+  box-shadow: 0 1px 2px hsl(var(--foreground) / 0.03);
+  transition:
+    border-color 0.2s ease,
+    box-shadow 0.2s ease,
+    background-color 0.2s ease;
+}
+
+.auth-input.pl-11 {
+  padding-left: 2.75rem;
+}
+
+.auth-input.pr-14 {
+  padding-right: 3.5rem;
+}
+
+.auth-input::placeholder {
+  color: var(--auth-placeholder);
+  opacity: 1;
+}
+
+.auth-input:hover {
+  border-color: hsl(var(--ring) / 0.5);
+}
+
+.auth-input:focus {
+  outline: none;
+  background: var(--auth-ivory);
+  border-color: hsl(var(--ring));
+  box-shadow: 0 0 0 3px hsl(var(--ring) / 0.15);
+}
+
+.auth-input-err {
+  border-color: hsl(var(--destructive));
+  box-shadow: 0 0 0 3px hsl(var(--destructive) / 0.12);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .auth-welcome {
+    transition-duration: 1ms;
+    transition-delay: 0ms;
+  }
+  .auth-welcome > div {
+    transition-duration: 1ms;
+  }
+  .auth-btn,
+  .auth-btn-ghost,
+  .auth-link,
+  .auth-input {
+    transition-duration: 1ms;
+  }
+}

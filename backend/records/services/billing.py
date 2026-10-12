@@ -1,0 +1,577 @@
+"""Payment Structure resolution and automatic invoice generation (spec §5–§12).
+
+An administrator configures ``FeeStructure`` rows; invoices are *always*
+calculated from them. Nobody types an invoice total.
+
+Fee resolution precedence (spec §6)::
+
+    class-specific  →  level-specific  →  school/session default
+
+For one fee type the most specific active row wins. `FeeStructure` is keyed by
+a `scope` + `scope_key` pair, so a fee type can only resolve to exactly one row
+per scope — the class row simply shadows the level row, which shadows the
+session default.
+
+Historical integrity (spec §8): the resolved rows are copied into
+``Invoice.items`` as an immutable snapshot, and ``Invoice.total`` is the sum of
+that snapshot. Later edits to the Payment Structure never rewrite an invoice
+that already exists.
+"""
+from __future__ import annotations
+
+import datetime
+from decimal import Decimal
+
+from django.db.models import Q, Sum
+from django.db.models.functions import Coalesce
+from django.utils import timezone
+from rest_framework.exceptions import ValidationError
+
+from ..models import (
+    AcademicSession,
+    Enrollment,
+    FeeStructure,
+    Invoice,
+    Level,
+    Payment,
+    Registration,
+    SchoolClass,
+    Student,
+    invoice_item_amount,
+)
+
+# Scope precedence, most specific first (spec §6).
+SCOPE_PRECEDENCE = (
+    FeeStructure.Scope.CLASS,
+    FeeStructure.Scope.LEVEL,
+    FeeStructure.Scope.SCHOOL,
+)
+
+
+def _decimal(value) -> Decimal:
+    return value if isinstance(value, Decimal) else Decimal(str(value or 0))
+
+
+def resolve_fee_structure(
+    school,
+    session: AcademicSession,
+    school_class: SchoolClass | None = None,
+    term: str = '',
+) -> list[FeeStructure]:
+    """Active fee rows that apply to a class in a session, most specific first.
+
+    A fee defined only at class scope does not also apply to the whole level;
+    each fee type resolves once, to the most specific row that defines it.
+    """
+    term = (term or '').strip()
+    level: Level | None = school_class.level if school_class is not None else None
+    queryset = FeeStructure.objects.filter(
+        school=school,
+        academic_session=session,
+        is_active=True,
+    )
+    rows = [
+        row for row in queryset
+        if row.applies_to(term=term, school_class=school_class, level=level)
+    ]
+
+    resolved: list[FeeStructure] = []
+    seen_fee_types: set[str] = set()
+    for scope in SCOPE_PRECEDENCE:
+        for row in rows:
+            if row.scope != scope or row.fee_type in seen_fee_types:
+                continue
+            if not row.is_required:
+                continue
+            seen_fee_types.add(row.fee_type)
+            resolved.append(row)
+    return resolved
+
+
+def build_invoice_snapshot(rows: list[FeeStructure]) -> tuple[list[dict], Decimal]:
+    """Freeze fee rows into invoice line items plus their total.
+
+    Amounts are normalised to strings so the JSON snapshot round-trips exactly
+    and historical totals never depend on float formatting.
+    """
+    items = [
+        {
+            'feeStructureId': row.id,
+            'feeType': row.fee_type,
+            'label': row.label,
+            'amount': str(_decimal(row.amount)),
+            'scope': row.scope,
+            'scopeKey': row.scope_key,
+            'term': row.term,
+            'isRequired': row.is_required,
+        }
+        for row in rows
+    ]
+    total = sum((invoice_item_amount(item) for item in items), Decimal('0'))
+    return items, total
+
+
+def snapshot_total(invoice: Invoice) -> Decimal:
+    """An invoice's total is always its own snapshot, never today's fees."""
+    if isinstance(invoice, Invoice):
+        return _decimal(invoice.total)
+    return sum((invoice_item_amount(item) for item in invoice or []), Decimal('0'))
+
+
+def verified_paid_total(invoice_id: int) -> Decimal:
+    """Sum of payments in the VERIFIED state only (spec §10, §14)."""
+    return Payment.objects.filter(
+        invoice_id=invoice_id, status=Payment.Status.VERIFIED,
+    ).aggregate(total=Coalesce(Sum('amount'), Decimal('0')))['total']
+
+
+def annotate_verified_paid(queryset):
+    """Attach `verified_paid_total` so list endpoints avoid N+1 aggregates."""
+    return queryset.annotate(
+        verified_paid_total=Coalesce(
+            Sum(
+                'payments__amount',
+                filter={'payments__status': Payment.Status.VERIFIED},
+            ),
+            Decimal('0'),
+        ),
+    )
+
+
+def create_invoice_for_student(
+    *,
+    school,
+    student,
+    session: AcademicSession,
+    school_class: SchoolClass | None = None,
+    term: str = '',
+    source: str = Invoice.Source.ADMISSION,
+    due_date=None,
+    items: list[dict] | None = None,
+    total: Decimal | None = None,
+) -> Invoice:
+    """Create one invoice, snapshotting the applicable Payment Structure.
+
+    `items`/`total` are only supplied by the migration workflow, which is
+    bringing in the school's own historical figures rather than re-deriving
+    them from today's fee configuration.
+    """
+    term = (term or '').strip()
+    if items is None:
+        # `resolve_invoice_items` is defined below and is what every other
+        # billing path uses, so a bulk-generated invoice and an admission
+        # invoice for the same student cannot disagree.
+        items = resolve_invoice_items(
+            school=school,
+            class_name=student.class_name if student is not None else '',
+            session=session,
+            school_class=school_class,
+            term=term,
+        )
+        computed_total = snapshot_total(items)
+    else:
+        items = [dict(item) for item in items]
+        computed_total = snapshot_total(items)
+    if total is not None:
+        computed_total = _decimal(total)
+
+    invoice, created = Invoice.objects.get_or_create(
+        student=student,
+        academic_session=session,
+        term=term,
+        defaults={
+            'school': school,
+            'source': source,
+            'items': items,
+            'total': computed_total,
+            'due_date': due_date,
+        },
+    )
+    return invoice
+
+
+def assert_payment_within_outstanding(invoice: Invoice, amount: Decimal) -> None:
+    """Reject a payment that would exceed the outstanding balance (spec §12).
+
+    The project has no student-credit/advance mechanism, so overpayment is
+    refused rather than silently creating money the ledger cannot represent.
+    """
+    outstanding = _decimal(invoice.total) - verified_paid_total(invoice.id)
+    if amount > outstanding:
+        raise ValidationError({
+            'amount': (
+                f'Amount exceeds the outstanding balance of '
+                f'{outstanding:,.2f}.'
+            ),
+        })
+
+
+def default_due_date(session: AcademicSession, *, days: int = 30):
+    """A 30-day due date from issue, so OVERDUE is meaningful (§11)."""
+    return timezone.now().date() + datetime.timedelta(days=days) if days else None
+
+
+# ── The legacy Payment Structure (School.fee_structure) ─────────────────────
+#
+# There are two fee representations in this schema. The relational
+# `FeeStructure` table is the spec model, and the editor in school settings
+# now writes it per level. `School.fee_structure` (JSON) is the older, school-wide
+# flat list that predates per-level pricing, and it is what schools that have
+# never opened the new editor still have.
+#
+# Invoicing therefore has to read both, in that order: relational rows first,
+# and the JSON only when a school has no relational rows for the scope being
+# billed. Term invoices exclude the one-time registration fee; admission
+# invoices select only that fee from the same resolver.
+
+
+def school_fee_items(school, class_name: str = '') -> list[dict]:
+    """Fee items from the legacy `School.fee_structure` JSON that apply to a class.
+
+    A row applies when its className is the wildcard or the class itself.
+    Amounts become strings so the invoice snapshot round-trips exactly, the
+    same way relational snapshots do.
+    """
+    class_name = (class_name or '').strip()
+    items = []
+    for row in school.fee_structure or []:
+        scope = str(row.get('className', '*') or '*')
+        if scope not in ('*', class_name):
+            continue
+        items.append({
+            'label': str(row.get('label') or ''),
+            'amount': str(_decimal(row.get('amount'))),
+            'className': scope,
+            'scope': 'school',
+        })
+    return items
+
+
+def _class_for_name(school, class_name: str) -> SchoolClass | None:
+    """The `SchoolClass` a denormalised `Student.class_name` refers to.
+
+    Fees are keyed on level/class, but the student row and the JSON fee list
+    both only carry the class *name*, so the level has to be recovered from the
+    class table. Missing classes are not an error: a school may register a
+    student before configuring the class, and those students simply bill from
+    the school-wide default.
+    """
+    name = (class_name or '').strip()
+    if not name:
+        return None
+    return school.school_classes.filter(name=name).first()
+
+
+def resolve_invoice_items(
+    *,
+    school,
+    class_name: str = '',
+    session: AcademicSession | None = None,
+    school_class: SchoolClass | None = None,
+    term: str = '',
+    fee_types: set[str] | None = None,
+    exclude_fee_types: set[str] | None = None,
+) -> list[dict]:
+    """The fee lines a class is billed, preferring per-level relational rows.
+
+    Relational rows win because that is the per-level Payment Structure the
+    school settings editor writes. The legacy JSON is consulted only when the
+    school has no relational rows at all for this session, which is every school
+    that has not yet used the new editor.
+
+    Both shapes are invoice-item dicts keyed by `label`/`amount`, so the caller
+    cannot tell which source it got and the snapshot format is identical.
+    """
+    if school_class is None:
+        school_class = _class_for_name(school, class_name)
+    if session is None:
+        from . import academic as academic_service
+
+        session = academic_service.current_session(school)
+
+    if session is not None:
+        rows = resolve_fee_structure(school, session, school_class, (term or '').strip())
+        if rows:
+            items, _total = build_invoice_snapshot(rows)
+        else:
+            items = school_fee_items(school, class_name)
+    else:
+        items = school_fee_items(school, class_name)
+
+    def fee_type(item):
+        explicit_type = item.get('feeType')
+        if explicit_type:
+            return explicit_type
+        label = str(item.get('label') or '').lower()
+        if 'registration' in label or 'admission' in label:
+            return FeeStructure.FeeType.REGISTRATION
+        return FeeStructure.FeeType.OTHER
+
+    if fee_types is not None:
+        items = [item for item in items if fee_type(item) in fee_types]
+    if exclude_fee_types:
+        items = [item for item in items if fee_type(item) not in exclude_fee_types]
+    return items
+
+
+def create_invoice_from_school_fees(
+    *,
+    school,
+    student,
+    term: str = '',
+    selection_term: str | None = None,
+    due_date=None,
+    source: str = Invoice.Source.ADMISSION,
+    session: AcademicSession | None = None,
+) -> Invoice | None:
+    """Issue a student's one-time registration invoice from configured fees.
+
+    The selection term allows a term-specific registration fee to be chosen
+    while the invoice itself keeps a blank term, making it distinct from all
+    recurring term invoices.
+    """
+    if session is None:
+        from . import academic as academic_service
+
+        session = academic_service.current_session(school)
+    if selection_term is None:
+        selection_term = term or school.current_term
+    items = resolve_invoice_items(
+        school=school,
+        class_name=student.class_name,
+        session=session,
+        term=selection_term,
+        fee_types={FeeStructure.FeeType.REGISTRATION},
+    )
+    if not items:
+        return None
+    total = sum((invoice_item_amount(item) for item in items), Decimal('0'))
+    if total <= 0:
+        return None
+    invoice, _created = Invoice.objects.get_or_create(
+        school=school,
+        student=student,
+        academic_session=session,
+        term=(term or '').strip(),
+        defaults={
+            'source': source,
+            'items': items,
+            'total': total,
+            'due_date': due_date,
+        },
+    )
+    return invoice
+
+
+def live_invoices(student) -> list[Invoice]:
+    """Invoices that actually still demand money (cancelled ones do not)."""
+    return list(Invoice.objects.filter(
+        school_id=student.school_id, student=student, is_cancelled=False,
+    ))
+
+
+def is_registration_invoice(invoice) -> bool:
+    """Is this invoice the one-time registration/admission charge?
+
+    Only that invoice decides whether a new student may start school. Regular
+    term fees are a separate business process and are never used as the test
+    for "is the registration still pending".
+    """
+    if invoice.source == Invoice.Source.ADMISSION:
+        return True
+    return any(
+        str((item or {}).get('feeType') or '') == FeeStructure.FeeType.REGISTRATION
+        for item in (invoice.items or [])
+    )
+
+
+def registration_invoices(student) -> list[Invoice]:
+    """The live invoices holding a new student's registration back, if any."""
+    return [invoice for invoice in live_invoices(student) if is_registration_invoice(invoice)]
+
+
+def registration_balance(student) -> Decimal:
+    """Unpaid registration/admission money, ignoring every other fee."""
+    outstanding = Decimal('0')
+    for invoice in registration_invoices(student):
+        outstanding += max(_decimal(invoice.total) - _decimal(invoice.verified_paid), Decimal('0'))
+    return outstanding
+
+
+def ensure_registration(
+    school, student, invoice=None, *, created_by=None,
+) -> Registration | None:
+    """Create (once) the PENDING registration a new student is admitted through.
+
+    Returns ``None`` when the school's academic structure is not ready yet —
+    a registration is anchored to a session and a class, and refusing to save
+    the student because setup is incomplete would be the worse failure.
+    """
+    from . import academic as academic_service
+
+    try:
+        session = academic_service.current_session(school)
+        if session is None:
+            session = academic_service.ensure_session(school)
+        school_class = academic_service.ensure_class(school, student.class_name)
+        section = academic_service.ensure_section(school, school_class, student.arm)
+    except ValidationError:
+        return None
+    registration, _created = Registration.objects.get_or_create(
+        school=school,
+        student=student,
+        academic_session=session,
+        defaults={
+            'intended_class': school_class,
+            'intended_section': section,
+            'invoice': invoice,
+            'created_by': created_by if getattr(created_by, 'school_id', None) else None,
+        },
+    )
+    if invoice is not None and registration.invoice_id is None:
+        registration.invoice = invoice
+        registration.save(update_fields=['invoice', 'updated_at'])
+    return registration
+
+
+def activate_registration(
+    student,
+    *,
+    actor=None,
+    source: str = Enrollment.ActivationSource.ADMIN_APPROVAL,
+) -> Enrollment | None:
+    """Approve the student's registration and seat them through an enrollment.
+
+    Idempotent: an already-approved registration keeps the enrollment it has,
+    so a repeated payment verification can never seat a student twice.
+    A rejected or cancelled registration is an administrative decision and is
+    never overridden from here.
+    """
+    from . import enrollment as enrollment_service
+
+    registration = ensure_registration(student.school, student)
+    if registration is None:
+        return None
+    if registration.status in (Registration.Status.REJECTED, Registration.Status.CANCELLED):
+        return None
+    if registration.status == Registration.Status.PENDING:
+        registration.status = Registration.Status.APPROVED
+        registration.approved_by = actor if getattr(actor, 'school_id', None) else None
+        registration.approved_at = timezone.now()
+        registration.decision_reason = registration.decision_reason or 'Approved automatically.'
+        registration.save(update_fields=[
+            'status', 'approved_by', 'approved_at', 'decision_reason', 'updated_at',
+        ])
+    enrollment = enrollment_service.activate_enrollment(
+        student=registration.student,
+        academic_session=registration.academic_session,
+        class_obj=registration.intended_class,
+        section=registration.intended_section,
+        source=source,
+        actor=actor,
+    )
+    enrollment_service.sync_student_class_mirror(registration.student, enrollment)
+    return enrollment
+
+
+def student_has_outstanding_balance(student) -> Decimal:
+    """Unpaid money owed across a student's live invoices.
+
+    Verified payments count against the total, so a pending payment does not
+    make a student look paid (spec §10).
+    """
+    invoices = Invoice.objects.filter(
+        school_id=student.school_id,
+        student=student,
+        is_cancelled=False,
+    )
+    outstanding = Decimal('0')
+    for invoice in invoices.annotate(
+        verified_paid_total=Coalesce(
+            Sum(
+                'payments__amount',
+                filter=Q(payments__status=Payment.Status.VERIFIED),
+            ),
+            Decimal('0'),
+        ),
+    ):
+        outstanding += _decimal(invoice.total) - _decimal(invoice.verified_paid_total)
+    return max(outstanding, Decimal('0'))
+
+
+def activate_student_if_fully_paid(student, actor=None) -> bool:
+    """Clear a PENDING_PAYMENT student once their registration fee is settled.
+
+    The registration invoice is the only test: ordinary school fees are billed
+    separately and never hold back — nor re-open — a completed registration, so
+    a student with an outstanding term balance stays enrolled (spec: the
+    registration workflow, not "any invoice balance > 0", decides this).
+
+    Only ever promotes a student forward, so a school that later suspends
+    somebody for unrelated reasons cannot have them silently reactivated by a
+    stray payment. Reaching here also seats the student's enrollment, so an
+    activated student always has one.
+    """
+    if student.status != Student.Status.PENDING_PAYMENT:
+        return False
+    invoices = live_invoices(student)
+    if not invoices:
+        return False
+    if registration_balance(student) > 0:
+        return False
+    student.status = Student.Status.ACTIVE
+    student.save(update_fields=['status'])
+    activate_registration(
+        student, actor=actor, source=Enrollment.ActivationSource.FULL_PAYMENT,
+    )
+    # Notified from here rather than at each of the three call sites: this is the
+    # one place the status actually flips, so it is the one place that cannot be
+    # forgotten and cannot notify for a promotion that did not happen.
+    # Imported inside the function because records.services.events imports this
+    # module's neighbours, and a top-level import would be circular.
+    from records.services import events as event_service
+    event_service.student_activated(student)
+    return True
+
+
+def invoice_pending_students(school, *, level: Level | None = None) -> tuple[int, int]:
+    """Raise missing registration invoices for pending students.
+
+    Pending students from older workflows need a registration invoice if one is
+    configured. If none applies, clear the old billing hold and let regular
+    school fees be billed through the term workflow. Returns the counts of
+    invoices created and students activated.
+
+    `level` narrows the run to one level. Saving fees for Junior Secondary must
+    not silently invoice every pending Nursery and Senior student, because those
+    students have no applicable fee and would only receive a partial or empty
+    bill. Passing None keeps the school-wide behaviour for the legacy
+    school-wide editor.
+    """
+    created = 0
+    activated = 0
+    pending = Student.objects.filter(
+        school=school, status=Student.Status.PENDING_PAYMENT,
+    ).order_by('id')
+    if level is not None:
+        # `class_name` is the denormalised mirror the student rows carry, so the
+        # narrowing has to happen on the name even though fees are keyed on the
+        # class row.
+        names = list(
+            school.school_classes.filter(level=level, is_active=True)
+            .values_list('name', flat=True)
+        )
+        pending = pending.filter(class_name__in=names)
+    for student in pending:
+        if live_invoices(student):
+            continue
+        if create_invoice_from_school_fees(school=school, student=student) is not None:
+            created += 1
+        else:
+            student.status = Student.Status.ACTIVE
+            student.save(update_fields=['status'])
+            # No registration fee applies, so the billing hold is released — and
+            # the student still has to be seated through an enrollment.
+            activate_registration(student)
+            activated += 1
+    return created, activated
